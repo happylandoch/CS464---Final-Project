@@ -14,8 +14,13 @@
 #ifndef _VOLUMERENDER_KERNEL_CU_
 #define _VOLUMERENDER_KERNEL_CU_
 
-#include <cutil_inline.h>    // includes cuda.h and cuda_runtime_api.h
-#include <cutil_math.h>
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+
+#include "cuda_utils.h"
+#include "cutil_math.h"
+
+//#include <cutil_inline.h>    // includes cuda.h and cuda_runtime_api.h
 
 typedef unsigned int  uint;
 typedef unsigned char uchar;
@@ -179,7 +184,8 @@ void initCuda(void *h_volume, cudaExtent volumeSize)
 {
     // create 3D array
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<VolumeType>();
-    cutilSafeCall( cudaMalloc3DArray(&d_volumeArray, &channelDesc, volumeSize) );
+    //cutilSafeCall( cudaMalloc3DArray(&d_volumeArray, &channelDesc, volumeSize) );
+    HANDLE_ERROR( cudaMalloc3DArray(&d_volumeArray, &channelDesc, volumeSize) );
 
     // copy data to 3D array
     cudaMemcpy3DParms copyParams = {0};
@@ -187,7 +193,8 @@ void initCuda(void *h_volume, cudaExtent volumeSize)
     copyParams.dstArray = d_volumeArray;
     copyParams.extent   = volumeSize;
     copyParams.kind     = cudaMemcpyHostToDevice;
-    cutilSafeCall( cudaMemcpy3D(&copyParams) );  
+    //cutilSafeCall( cudaMemcpy3D(&copyParams) );  
+    HANDLE_ERROR( cudaMemcpy3D(&copyParams) );  
 
     // set texture parameters
     tex.normalized = true;                      // access with normalized texture coordinates
@@ -196,7 +203,8 @@ void initCuda(void *h_volume, cudaExtent volumeSize)
     tex.addressMode[1] = cudaAddressModeClamp;
 
     // bind array to 3D texture
-    cutilSafeCall(cudaBindTextureToArray(tex, d_volumeArray, channelDesc));
+    //cutilSafeCall(cudaBindTextureToArray(tex, d_volumeArray, channelDesc));
+    HANDLE_ERROR(cudaBindTextureToArray(tex, d_volumeArray, channelDesc));
 
     // create transfer function texture
     float4 transferFunc[] = {
@@ -213,22 +221,27 @@ void initCuda(void *h_volume, cudaExtent volumeSize)
 
     cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc<float4>();
     cudaArray* d_transferFuncArray;
-    cutilSafeCall(cudaMallocArray( &d_transferFuncArray, &channelDesc2, sizeof(transferFunc)/sizeof(float4), 1)); 
-    cutilSafeCall(cudaMemcpyToArray( d_transferFuncArray, 0, 0, transferFunc, sizeof(transferFunc), cudaMemcpyHostToDevice));
+    //cutilSafeCall(cudaMallocArray( &d_transferFuncArray, &channelDesc2, sizeof(transferFunc)/sizeof(float4), 1)); 
+    //cutilSafeCall(cudaMemcpyToArray( d_transferFuncArray, 0, 0, transferFunc, sizeof(transferFunc), cudaMemcpyHostToDevice));
+    HANDLE_ERROR(cudaMallocArray( &d_transferFuncArray, &channelDesc2, sizeof(transferFunc)/sizeof(float4), 1)); 
+    HANDLE_ERROR(cudaMemcpyToArray( d_transferFuncArray, 0, 0, transferFunc, sizeof(transferFunc), cudaMemcpyHostToDevice));
 
     transferTex.filterMode = cudaFilterModeLinear;
     transferTex.normalized = true;    // access with normalized texture coordinates
     transferTex.addressMode[0] = cudaAddressModeClamp;   // wrap texture coordinates
 
     // Bind the array to the texture
-    cutilSafeCall( cudaBindTextureToArray( transferTex, d_transferFuncArray, channelDesc2));
+    //cutilSafeCall( cudaBindTextureToArray( transferTex, d_transferFuncArray, channelDesc2));
+    HANDLE_ERROR( cudaBindTextureToArray( transferTex, d_transferFuncArray, channelDesc2));
 }
 
 extern "C" 
 void freeCudaBuffers()
 {
-    cutilSafeCall(cudaFreeArray(d_volumeArray));
-    cutilSafeCall(cudaFreeArray(d_transferFuncArray));
+    //cutilSafeCall(cudaFreeArray(d_volumeArray));
+    //cutilSafeCall(cudaFreeArray(d_transferFuncArray));
+    HANDLE_ERROR(cudaFreeArray(d_volumeArray));
+    HANDLE_ERROR(cudaFreeArray(d_transferFuncArray));
 }
 
 
@@ -243,7 +256,8 @@ void render_kernel(dim3 gridSize, dim3 blockSize, uint *d_output, uint imageW, u
 extern "C"
 void copyInvViewMatrix(float *invViewMatrix, size_t sizeofMatrix)
 {
-    cutilSafeCall( cudaMemcpyToSymbol(c_invViewMatrix, invViewMatrix, sizeofMatrix) );
+    //cutilSafeCall( cudaMemcpyToSymbol(c_invViewMatrix, invViewMatrix, sizeofMatrix) );
+    HANDLE_ERROR( cudaMemcpyToSymbol(c_invViewMatrix, invViewMatrix, sizeofMatrix) );
 }
 
 
