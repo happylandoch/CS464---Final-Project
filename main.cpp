@@ -8,7 +8,7 @@
  * is strictly prohibited.
  *
  */
- 
+
 /*
     Volume rendering sample
 
@@ -24,6 +24,10 @@
     - changed to render from front-to-back rather than back-to-front.
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 // OpenGL Graphics includes
 #include <GL/glew.h>
 #if defined (__APPLE__) || defined(MACOSX)
@@ -36,6 +40,7 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #include <cuda_gl_interop.h>
+
 //#include <cutil_inline.h>    // includes cuda.h and cuda_runtime_api.h
 //#include <cutil_gl_inline.h> // includes cuda_gl_interop.h
 //#include <rendercheck_gl.h>
@@ -47,7 +52,6 @@
 
 
 #include "cuda_utils.h"
-
 
 
 typedef unsigned int uint;
@@ -84,8 +88,8 @@ unsigned int timer = 0;
 extern "C" void setTextureFilterMode(bool bLinearFilter);
 extern "C" void initCuda(void *h_volume, cudaExtent volumeSize);
 extern "C" void freeCudaBuffers();
-extern "C" void render_kernel(dim3 gridSize, dim3 blockSize, uint *d_output, uint imageW, uint imageH, 
-							  float density, float brightness, float transferOffset, float transferScale);
+extern "C" void render_kernel(dim3 gridSize, dim3 blockSize, uint *d_output, uint imageW, uint imageH,
+                              float density, float brightness, float transferOffset, float transferScale);
 extern "C" void copyInvViewMatrix(float *invViewMatrix, size_t sizeofMatrix);
 
 void initPixelBuffer();
@@ -93,16 +97,16 @@ void initPixelBuffer();
 // render image using CUDA
 void render()
 {
-	copyInvViewMatrix(invViewMatrix, sizeof(float4)*3);
+    size_t num_bytes;
+
+    copyInvViewMatrix(invViewMatrix, sizeof(float4)*3);
 
     // map PBO to get CUDA device pointer
     uint *d_output;
-	// map PBO to get CUDA device pointer
-	HANDLE_ERROR(cudaGraphicsMapResources(1, &cuda_pbo_resource, 0));
-    size_t num_bytes; 
-    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&d_output, &num_bytes,  
-						       cuda_pbo_resource));
-    //printf("CUDA mapped PBO: May access %ld bytes\n", num_bytes);
+    // map PBO to get CUDA device pointer
+    HANDLE_ERROR( cudaGraphicsMapResources(1, &cuda_pbo_resource, 0) );
+    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&d_output, &num_bytes, cuda_pbo_resource));
+    //fprintf(stderr, "CUDA mapped PBO: May access %ld bytes\n", num_bytes);
 
     // clear image
     HANDLE_ERROR(cudaMemset(d_output, 0, width*height*4));
@@ -129,8 +133,8 @@ void display()
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
     glPopMatrix();
 
-    invViewMatrix[0] = modelView[0]; invViewMatrix[1] = modelView[4]; invViewMatrix[2] = modelView[8]; invViewMatrix[3] = modelView[12];
-    invViewMatrix[4] = modelView[1]; invViewMatrix[5] = modelView[5]; invViewMatrix[6] = modelView[9]; invViewMatrix[7] = modelView[13];
+    invViewMatrix[0] = modelView[0]; invViewMatrix[1] = modelView[4]; invViewMatrix[ 2] = modelView[ 8]; invViewMatrix[ 3] = modelView[12];
+    invViewMatrix[4] = modelView[1]; invViewMatrix[5] = modelView[5]; invViewMatrix[ 6] = modelView[ 9]; invViewMatrix[ 7] = modelView[13];
     invViewMatrix[8] = modelView[2]; invViewMatrix[9] = modelView[6]; invViewMatrix[10] = modelView[10]; invViewMatrix[11] = modelView[14];
 
     render();
@@ -247,7 +251,7 @@ void motion(int x, int y)
     if (buttonState == 4) {
         // right = zoom
         viewTranslation.z += dy / 100.0f;
-    } 
+    }
     else if (buttonState == 2) {
         // middle = translate
         viewTranslation.x += dx / 100.0f;
@@ -259,7 +263,8 @@ void motion(int x, int y)
         viewRotation.y += dx / 5.0f;
     }
 
-    ox = x; oy = y;
+    ox = x;
+    oy = y;
     glutPostRedisplay();
 }
 
@@ -315,7 +320,7 @@ void initPixelBuffer()
 {
     if (pbo) {
         // unregister this buffer object from CUDA C
-        HANDLE_ERROR(cudaGraphicsUnregisterResource(cuda_pbo_resource));
+        HANDLE_ERROR( cudaGraphicsUnregisterResource(cuda_pbo_resource) );
 
         // delete old buffer
         glDeleteBuffersARB(1, &pbo);
@@ -324,12 +329,12 @@ void initPixelBuffer()
 
     // create pixel buffer object for display
     glGenBuffersARB(1, &pbo);
-	glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
-	glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, width*height*sizeof(GLubyte)*4, 0, GL_STREAM_DRAW_ARB);
-	glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
+    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, width*height*sizeof(GLubyte)*4, 0, GL_STREAM_DRAW_ARB);
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 
     // register this buffer object with CUDA
-	HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard) );	
+    HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard) );
 
     // create texture for display
     glGenTextures(1, &tex);
@@ -362,8 +367,24 @@ void *loadRawFile(char *filename, size_t size)
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
-int main(int argc, char** argv) 
+int main(int argc, char** argv)
 {
+    cudaDeviceProp prop;
+    int dev;
+
+    HANDLE_ERROR(cudaGetDevice(&dev));
+    fprintf(stderr, "ID of  current CUDA device: %d\n", dev);
+
+    memset(&prop, 0, sizeof(cudaDeviceProp));
+    prop.major = 1;
+    prop.minor = 3;
+
+    HANDLE_ERROR(cudaChooseDevice(&dev, &prop));
+    printf("ID of CUDA device closest to revision 1.3: %d\n", dev);
+    //HANDLE_ERROR(cudaSetDevice(dev));
+
+    HANDLE_ERROR( cudaGLSetGLDevice(dev) );
+
     // First initialize OpenGL context, so we can properly set the GL for CUDA.
     // This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
     initGL( &argc, argv );
