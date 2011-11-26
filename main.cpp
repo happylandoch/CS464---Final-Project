@@ -60,25 +60,78 @@ typedef unsigned char uchar;
 #define MAX_EPSILON_ERROR 5.00f
 #define THRESHOLD         0.30f
 
+typedef struct data_set DataSet;
+typedef struct data_set *DataSetPtr;
 
-uint width = 512;
-uint height = 512;
-dim3 blockSize(16, 16);
-dim3 gridSize;
+DataSetPtr *current;
 
-float3 viewRotation;
-float3 viewTranslation = make_float3(0.0, 0.0, -4.0f);
-float invViewMatrix[12];
+struct data_set{
+    //values for loading data file
+    char *volumeFilename;
+    char *filePath;
+    cudaExtent volumeSize;
+    size_t size;
+    void *h_volume;
+    //VolumeType;
+    //=======
+    uint *d_output;
+    size_t num_bytes;
+    GLuint tex;
+    GLuint pbo;
+    struct cudaGraphicsResource *cuda_pbo_resource    
+    //values that go to render_kernel
+    uint width;
+    uint hieght;
+    dim3 gridSize;
+    dim3 blockSize;
+    float density;
+    float brightness;
+    float transferOffset;
+    float transferScale;
+    bool linearFiltering;
+    //==========
+    float3 viewRotation;
+    float3 viewTranslation;
+    float invViewMatrix[12];
+};
 
-float density = 0.05f;
-float brightness = 1.0f;
-float transferOffset = 0.0f;
-float transferScale = 1.0f;
-bool linearFiltering = true;
 
-GLuint pbo = 0;     // OpenGL pixel buffer object
-GLuint tex = 0;     // OpenGL texture object
-struct cudaGraphicsResource *cuda_pbo_resource; // CUDA Graphics Resource (to transfer PBO)
+
+//struct DataSet *ds;
+
+//ds->volumeName = "Bucky.raw";
+//ds->filePath   = "./data/Bucky.raw";
+//ds->volumeSize = make_cudaExtent(32, 32, 32)
+//ds->size   = ds->volumeSize.width * ds->volumeSize.height * ds->volumeSize.depth * sizeof(unsigned char);
+//ds->width  = 512;
+//ds->hieght = 512;
+//ds->blockSize(16, 16);
+//ds->density	    = 0.05f;
+//ds->brightness	    = 1.0f;
+//ds->transferOffset  = 0.0f;
+//ds->transferScale   = 1.0f;
+//ds->linearFiltering = true;
+//ds->viewTranslation = make_float3(0.0, 0.0, -4.0f);
+
+
+//uint width = 512;
+//uint height = 512;
+//dim3 blockSize(16, 16);
+//dim3 gridSize;
+
+//float3 viewRotation;
+//float3 viewTranslation = make_float3(0.0, 0.0, -4.0f);
+//float invViewMatrix[12];
+
+//float density = 0.05f;
+//float brightness = 1.0f;
+//float transferOffset = 0.0f;
+//float transferScale = 1.0f;
+//bool linearFiltering = true;
+
+//GLuint pbo = 0;     // OpenGL pixel buffer object
+//GLuint tex = 0;     // OpenGL texture object
+//struct cudaGraphicsResource *cuda_pbo_resource; // CUDA Graphics Resource (to transfer PBO)
 
 unsigned int timer = 0;
 
@@ -92,31 +145,35 @@ extern "C" void render_kernel(dim3 gridSize, dim3 blockSize, uint *d_output, uin
                               float density, float brightness, float transferOffset, float transferScale);
 extern "C" void copyInvViewMatrix(float *invViewMatrix, size_t sizeofMatrix);
 
-void initPixelBuffer();
+void initPixelBuffer(DataSetPtr ds_pix);
 
 // render image using CUDA
 void render()
 {
-    size_t num_bytes;
+    //size_t num_bytes;
 
     copyInvViewMatrix(invViewMatrix, sizeof(float4)*3);
 
     // map PBO to get CUDA device pointer
-    uint *d_output;
+    //uint *d_output;
     // map PBO to get CUDA device pointer
-    HANDLE_ERROR( cudaGraphicsMapResources(1, &cuda_pbo_resource, 0) );
-    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&d_output, &num_bytes, cuda_pbo_resource));
+    HANDLE_ERROR( cudaGraphicsMapResources(1, &current->cuda_pbo_resource, 0) );
+    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&current->d_output, 
+							       &current->num_bytes, 
+							       current->cuda_pbo_resource));
     //fprintf(stderr, "CUDA mapped PBO: May access %ld bytes\n", num_bytes);
 
     // clear image
-    HANDLE_ERROR(cudaMemset(d_output, 0, width*height*4));
+    HANDLE_ERROR(cudaMemset(current->d_output, 0, current->width*current->height*4));
 
     // call CUDA kernel, writing results to PBO
-    render_kernel(gridSize, blockSize, d_output, width, height, density, brightness, transferOffset, transferScale);
+    render_kernel(current->gridSize, current->blockSize, current->d_output, current->width, 
+		  current->height, current->density, current->brightness, current->transferOffset, 
+		  current->transferScale);
 
     //cutilCheckMsg("kernel failed");
 
-    HANDLE_ERROR(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
+    HANDLE_ERROR(cudaGraphicsUnmapResources(1, &current->cuda_pbo_resource, 0));
 }
 
 // display results using OpenGL (called by GLUT)
@@ -127,15 +184,24 @@ void display()
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
         glLoadIdentity();
-        glRotatef(-viewRotation.x, 1.0, 0.0, 0.0);
-        glRotatef(-viewRotation.y, 0.0, 1.0, 0.0);
-        glTranslatef(-viewTranslation.x, -viewTranslation.y, -viewTranslation.z);
+        glRotatef(-current->viewRotation.x, 1.0, 0.0, 0.0);
+        glRotatef(-current->viewRotation.y, 0.0, 1.0, 0.0);
+        glTranslatef(-current->viewTranslation.x, -current->viewTranslation.y, -current->viewTranslation.z);
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
     glPopMatrix();
 
-    invViewMatrix[0] = modelView[0]; invViewMatrix[1] = modelView[4]; invViewMatrix[ 2] = modelView[ 8]; invViewMatrix[ 3] = modelView[12];
-    invViewMatrix[4] = modelView[1]; invViewMatrix[5] = modelView[5]; invViewMatrix[ 6] = modelView[ 9]; invViewMatrix[ 7] = modelView[13];
-    invViewMatrix[8] = modelView[2]; invViewMatrix[9] = modelView[6]; invViewMatrix[10] = modelView[10]; invViewMatrix[11] = modelView[14];
+    invViewMatrix[ 0] = modelView[ 0]; 
+    invViewMatrix[ 1] = modelView[ 4]; 
+    invViewMatrix[ 2] = modelView[ 8]; 
+    invViewMatrix[ 3] = modelView[12];
+    invViewMatrix[ 4] = modelView[ 1]; 
+    invViewMatrix[ 5] = modelView[ 5]; 
+    invViewMatrix[ 6] = modelView[ 9]; 
+    invViewMatrix[ 7] = modelView[13];
+    invViewMatrix[ 8] = modelView[ 2]; 
+    invViewMatrix[ 9] = modelView[ 6]; 
+    invViewMatrix[10] = modelView[10]; 
+    invViewMatrix[11] = modelView[14];
 
     render();
 
@@ -156,8 +222,8 @@ void display()
     // draw using texture
 
     // copy from pbo to texture
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
-    glBindTexture(GL_TEXTURE_2D, tex);
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, current->pbo);
+    glBindTexture(GL_TEXTURE_2D, current->tex);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 
@@ -191,35 +257,35 @@ void keyboard(unsigned char key, int x, int y)
             exit(0);
             break;
         case 'f':
-            linearFiltering = !linearFiltering;
-            setTextureFilterMode(linearFiltering);
+            current->linearFiltering = !ds->linearFiltering;
+            setTextureFilterMode(ds->linearFiltering);
             break;
         case '+':
-            density += 0.01f;
+            current->density += 0.01f;
             break;
         case '-':
-            density -= 0.01f;
+            current->density -= 0.01f;
             break;
 
         case ']':
-            brightness += 0.1f;
+            current->brightness += 0.1f;
             break;
         case '[':
-            brightness -= 0.1f;
+            current->brightness -= 0.1f;
             break;
 
         case ';':
-            transferOffset += 0.01f;
+            current->transferOffset += 0.01f;
             break;
         case '\'':
-            transferOffset -= 0.01f;
+            current->transferOffset -= 0.01f;
             break;
 
         case '.':
-            transferScale += 0.01f;
+            current->transferScale += 0.01f;
             break;
         case ',':
-            transferScale -= 0.01f;
+            current->transferScale -= 0.01f;
             break;
 
         default:
@@ -250,17 +316,17 @@ void motion(int x, int y)
 
     if (buttonState == 4) {
         // right = zoom
-        viewTranslation.z += dy / 100.0f;
+        current->viewTranslation.z += dy / 100.0f;
     }
     else if (buttonState == 2) {
         // middle = translate
-        viewTranslation.x += dx / 100.0f;
-        viewTranslation.y -= dy / 100.0f;
+        current->viewTranslation.x += dx / 100.0f;
+        current->viewTranslation.y -= dy / 100.0f;
     }
     else if (buttonState == 1) {
         // left = rotate
-        viewRotation.x += dy / 5.0f;
-        viewRotation.y += dx / 5.0f;
+        current->viewRotation.x += dy / 5.0f;
+        current->viewRotation.y += dx / 5.0f;
     }
 
     ox = x;
@@ -274,11 +340,11 @@ int iDivUp(int a, int b){
 
 void reshape(int w, int h)
 {
-    width = w; height = h;
+    ds->width = w; ds->height = h;
     initPixelBuffer();
 
     // calculate new grid size
-    gridSize = dim3(iDivUp(width, blockSize.x), iDivUp(height, blockSize.y));
+    gridSize = dim3(iDivUp(current->width, current->blockSize.x), iDivUp(current->height, current->blockSize.y));
 
     glViewport(0, 0, w, h);
 
@@ -294,10 +360,10 @@ void cleanup()
 {
     freeCudaBuffers();
 
-    if (pbo) {
-        cudaGraphicsUnregisterResource(cuda_pbo_resource);
-        glDeleteBuffersARB(1, &pbo);
-        glDeleteTextures(1, &tex);
+    if (ds->pbo) {
+        cudaGraphicsUnregisterResource(current->cuda_pbo_resource);
+        glDeleteBuffersARB(1, &current_>pbo);
+        glDeleteTextures(1, &current->tex);
     }
 }
 
@@ -306,7 +372,7 @@ void initGL(int *argc, char **argv)
     // initialize GLUT callback functions
     glutInit(argc, argv);
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE);
-    glutInitWindowSize(width, height);
+    glutInitWindowSize(ds->width, ds->height);
     glutCreateWindow("CUDA volume rendering");
 
     glewInit();
@@ -316,30 +382,30 @@ void initGL(int *argc, char **argv)
     }
 }
 
-void initPixelBuffer()
+void initPixelBuffer(DataSetPtr ds_pix)
 {
-    if (pbo) {
+    if (ds_pix->pbo) {
         // unregister this buffer object from CUDA C
-        HANDLE_ERROR( cudaGraphicsUnregisterResource(cuda_pbo_resource) );
+        HANDLE_ERROR( cudaGraphicsUnregisterResource(ds_pix->cuda_pbo_resource) );
 
         // delete old buffer
-        glDeleteBuffersARB(1, &pbo);
-        glDeleteTextures(1, &tex);
+        glDeleteBuffersARB(1, &ds_pix->pbo);
+        glDeleteTextures(1, &ds_pix->tex);
     }
 
     // create pixel buffer object for display
-    glGenBuffersARB(1, &pbo);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
-    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, width*height*sizeof(GLubyte)*4, 0, GL_STREAM_DRAW_ARB);
+    glGenBuffersARB(1, &ds_pix->pbo);
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, ds_pix->pbo);
+    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, ds_pix->width*ds_pix->height*sizeof(GLubyte)*4, 0, GL_STREAM_DRAW_ARB);
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 
     // register this buffer object with CUDA
-    HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard) );
+    HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&ds_pix->cuda_pbo_resource, ds_pix->pbo, cudaGraphicsMapFlagsWriteDiscard) );
 
     // create texture for display
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &ds_pix->tex);
+    glBindTexture(GL_TEXTURE_2D, ds_pix->tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ds_pix->width, ds_pix->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -384,23 +450,40 @@ int main(int argc, char** argv)
     //HANDLE_ERROR(cudaSetDevice(dev));
 
     HANDLE_ERROR( cudaGLSetGLDevice(dev) );
-
     // First initialize OpenGL context, so we can properly set the GL for CUDA.
     // This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
     initGL( &argc, argv );
 
+    DataSetPtr ds = (DataSetPtr)malloc(sizeof(DataSet));
+
+//========= Initialize dataset structure values =========================
+    ds->volumeName = "Bucky.raw";
+    ds->filePath   = "./data/Bucky.raw";
+    ds->volumeSize = make_cudaExtent(32, 32, 32)
+    ds->size   = ds->volumeSize.width * ds->volumeSize.height 
+				      * ds->volumeSize.depth 
+				      * sizeof(unsigned char);
+    ds->width  = 512;
+    ds->hieght = 512;
+    ds->blockSize(16, 16);
+    ds->density		= 0.05f;
+    ds->brightness      = 1.0f;
+    ds->transferOffset  = 0.0f;
+    ds->transferScale   = 1.0f;
+    ds->linearFiltering = true;
+    ds->viewTranslation = make_float3(0.0, 0.0, -4.0f);
+//========= End initializing dataset structure values =========================
+
+    current = ds;
+
     // load volume data
-    char * path = "./data/Bucky.raw";
-    cudaExtent volumeSize = make_cudaExtent(32, 32, 32);
-
-    size_t size = volumeSize.width * volumeSize.height * volumeSize.depth * sizeof(unsigned char);
-    void *h_volume = loadRawFile(path, size);
-
-    initCuda(h_volume, volumeSize);
-    free(h_volume);
+    ds->h_volume = loadRawFile(ds->path, ds->size);
+    initCuda(ds->h_volume, ds->volumeSize);
+    free(ds->h_volume);
+    initPixelBuffer(ds);
 
     // calculate new grid size
-    gridSize = dim3(iDivUp(width, blockSize.x), iDivUp(height, blockSize.y));
+    ds->gridSize = dim3(iDivUp(ds->width, ds->blockSize.x), iDivUp(ds->height, ds->blockSize.y));
 
     // This is the normal rendering path for VolumeRender
     glutDisplayFunc(display);
@@ -410,7 +493,6 @@ int main(int argc, char** argv)
     glutReshapeFunc(reshape);
     glutIdleFunc(idle);
 
-    initPixelBuffer();
 
     atexit(cleanup);
 
