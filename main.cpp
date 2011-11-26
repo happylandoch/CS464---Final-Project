@@ -59,13 +59,14 @@ typedef unsigned char uchar;
 
 #define MAX_EPSILON_ERROR 5.00f
 #define THRESHOLD         0.30f
+#define num_sets    3
 
 typedef struct data_set DataSet;
 typedef struct data_set *DataSetPtr;
 
-DataSetPtr *current;
+DataSetPtr current;
 
-struct data_set{
+struct data_set {
     //values for loading data file
     char *volumeFilename;
     char *filePath;
@@ -78,10 +79,10 @@ struct data_set{
     size_t num_bytes;
     GLuint tex;
     GLuint pbo;
-    struct cudaGraphicsResource *cuda_pbo_resource    
+    struct cudaGraphicsResource *cuda_pbo_resource;    
     //values that go to render_kernel
     uint width;
-    uint hieght;
+    uint height;
     dim3 gridSize;
     dim3 blockSize;
     float density;
@@ -92,48 +93,13 @@ struct data_set{
     //==========
     float3 viewRotation;
     float3 viewTranslation;
-    float invViewMatrix[12];
 };
 
+DataSet ds[num_sets];
 
-
-//struct DataSet *ds;
-
-//ds->volumeName = "Bucky.raw";
-//ds->filePath   = "./data/Bucky.raw";
-//ds->volumeSize = make_cudaExtent(32, 32, 32)
-//ds->size   = ds->volumeSize.width * ds->volumeSize.height * ds->volumeSize.depth * sizeof(unsigned char);
-//ds->width  = 512;
-//ds->hieght = 512;
-//ds->blockSize(16, 16);
-//ds->density	    = 0.05f;
-//ds->brightness	    = 1.0f;
-//ds->transferOffset  = 0.0f;
-//ds->transferScale   = 1.0f;
-//ds->linearFiltering = true;
-//ds->viewTranslation = make_float3(0.0, 0.0, -4.0f);
-
-
-//uint width = 512;
-//uint height = 512;
-//dim3 blockSize(16, 16);
-//dim3 gridSize;
-
-//float3 viewRotation;
-//float3 viewTranslation = make_float3(0.0, 0.0, -4.0f);
-//float invViewMatrix[12];
-
-//float density = 0.05f;
-//float brightness = 1.0f;
-//float transferOffset = 0.0f;
-//float transferScale = 1.0f;
-//bool linearFiltering = true;
-
-//GLuint pbo = 0;     // OpenGL pixel buffer object
-//GLuint tex = 0;     // OpenGL texture object
-//struct cudaGraphicsResource *cuda_pbo_resource; // CUDA Graphics Resource (to transfer PBO)
 
 unsigned int timer = 0;
+float invViewMatrix[12];
 
 
 #define MAX(a,b) ((a > b) ? a : b)
@@ -148,7 +114,7 @@ extern "C" void copyInvViewMatrix(float *invViewMatrix, size_t sizeofMatrix);
 void initPixelBuffer(DataSetPtr ds_pix);
 
 // render image using CUDA
-void render()
+void render(DataSetPtr ds_rend)
 {
     //size_t num_bytes;
 
@@ -157,89 +123,94 @@ void render()
     // map PBO to get CUDA device pointer
     //uint *d_output;
     // map PBO to get CUDA device pointer
-    HANDLE_ERROR( cudaGraphicsMapResources(1, &current->cuda_pbo_resource, 0) );
-    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&current->d_output, 
-							       &current->num_bytes, 
-							       current->cuda_pbo_resource));
+    HANDLE_ERROR( cudaGraphicsMapResources(1, &(ds_rend->cuda_pbo_resource), 0) );
+    HANDLE_ERROR(cudaGraphicsResourceGetMappedPointer((void **)&(ds_rend->d_output), 
+							       &(ds_rend->num_bytes), 
+							       ds_rend->cuda_pbo_resource));
     //fprintf(stderr, "CUDA mapped PBO: May access %ld bytes\n", num_bytes);
 
     // clear image
-    HANDLE_ERROR(cudaMemset(current->d_output, 0, current->width*current->height*4));
+    HANDLE_ERROR(cudaMemset(ds_rend->d_output, 0, ds_rend->width*ds_rend->height*4));
 
     // call CUDA kernel, writing results to PBO
-    render_kernel(current->gridSize, current->blockSize, current->d_output, current->width, 
-		  current->height, current->density, current->brightness, current->transferOffset, 
-		  current->transferScale);
+    render_kernel(ds_rend->gridSize, ds_rend->blockSize, ds_rend->d_output, ds_rend->width, 
+		  ds_rend->height, ds_rend->density, ds_rend->brightness, ds_rend->transferOffset, 
+		  ds_rend->transferScale);
 
     //cutilCheckMsg("kernel failed");
 
-    HANDLE_ERROR(cudaGraphicsUnmapResources(1, &current->cuda_pbo_resource, 0));
+    HANDLE_ERROR(cudaGraphicsUnmapResources(1, &(ds_rend->cuda_pbo_resource), 0));
 }
 
 // display results using OpenGL (called by GLUT)
 void display()
 {
     // use OpenGL to build view matrix
-    GLfloat modelView[16];
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
+    int i;
+    for(i=0; i<num_sets; i++)
+    {
+	GLfloat modelView[16];
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
         glLoadIdentity();
-        glRotatef(-current->viewRotation.x, 1.0, 0.0, 0.0);
-        glRotatef(-current->viewRotation.y, 0.0, 1.0, 0.0);
-        glTranslatef(-current->viewTranslation.x, -current->viewTranslation.y, -current->viewTranslation.z);
-    glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
-    glPopMatrix();
+        glRotatef(-ds[i].viewRotation.x, 1.0, 0.0, 0.0);
+        glRotatef(-ds[i].viewRotation.y, 0.0, 1.0, 0.0);
+        glTranslatef(-ds[i].viewTranslation.x, -ds[i].viewTranslation.y, -ds[i].viewTranslation.z);
+	glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+	glPopMatrix();
 
-    invViewMatrix[ 0] = modelView[ 0]; 
-    invViewMatrix[ 1] = modelView[ 4]; 
-    invViewMatrix[ 2] = modelView[ 8]; 
-    invViewMatrix[ 3] = modelView[12];
-    invViewMatrix[ 4] = modelView[ 1]; 
-    invViewMatrix[ 5] = modelView[ 5]; 
-    invViewMatrix[ 6] = modelView[ 9]; 
-    invViewMatrix[ 7] = modelView[13];
-    invViewMatrix[ 8] = modelView[ 2]; 
-    invViewMatrix[ 9] = modelView[ 6]; 
-    invViewMatrix[10] = modelView[10]; 
-    invViewMatrix[11] = modelView[14];
+	invViewMatrix[ 0] = modelView[ 0]; 
+        invViewMatrix[ 1] = modelView[ 4]; 
+	invViewMatrix[ 2] = modelView[ 8]; 
+        invViewMatrix[ 3] = modelView[12];
+	invViewMatrix[ 4] = modelView[ 1]; 
+        invViewMatrix[ 5] = modelView[ 5]; 
+	invViewMatrix[ 6] = modelView[ 9]; 
+        invViewMatrix[ 7] = modelView[13];
+	invViewMatrix[ 8] = modelView[ 2]; 
+        invViewMatrix[ 9] = modelView[ 6]; 
+	invViewMatrix[10] = modelView[10]; 
+        invViewMatrix[11] = modelView[14];
 
-    render();
-
+	render(&(ds[i]));
+    }
     // display results
     glClear(GL_COLOR_BUFFER_BIT);
 
     // draw image from PBO
     glDisable(GL_DEPTH_TEST);
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-#if 0
-    // draw using glDrawPixels (slower)
-    glRasterPos2i(0, 0);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
-    glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-#else
     // draw using texture
 
-    // copy from pbo to texture
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, current->pbo);
-    glBindTexture(GL_TEXTURE_2D, current->tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-
-    // draw textured quad
     glEnable(GL_TEXTURE_2D);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0, 0); glVertex2f(0, 0);
-    glTexCoord2f(1, 0); glVertex2f(1, 0);
-    glTexCoord2f(1, 1); glVertex2f(1, 1);
-    glTexCoord2f(0, 1); glVertex2f(0, 1);
-    glEnd();
+    // copy from pbo to texture
+    for(i=0; i<num_sets; i++)
+    {
+	glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, ds[i].pbo);
+	glBindTexture(GL_TEXTURE_2D, ds[i].tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ds[i].width, ds[i].height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 
-    glDisable(GL_TEXTURE_2D);
+	// unbind pbo
+	glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+
+	// draw textured quad
+	glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex2f(0, 0);
+	glTexCoord2f(1, 0); glVertex2f(1, 0);
+        glTexCoord2f(1, 1); glVertex2f(1, 1);
+	glTexCoord2f(0, 1); glVertex2f(0, 1);
+        glEnd();
+
+	fprintf(stderr, "HERE\n");
+
+    }
     glBindTexture(GL_TEXTURE_2D, 0);
-#endif
-
+    glDisable(GL_TEXTURE_2D);
+    
     glutSwapBuffers();
     glutReportErrors();
 }
@@ -340,11 +311,15 @@ int iDivUp(int a, int b){
 
 void reshape(int w, int h)
 {
-    ds->width = w; ds->height = h;
-    initPixelBuffer();
+    int i;
+    for(i=0; i<num_sets; i++)
+    {
+	ds[i].width = w; ds[i].height = h;
+	initPixelBuffer(&(ds[i]));
 
     // calculate new grid size
-    gridSize = dim3(iDivUp(current->width, current->blockSize.x), iDivUp(current->height, current->blockSize.y));
+	ds[i].gridSize = dim3(iDivUp(ds[i].width, ds[i].blockSize.x), iDivUp(ds[i].height, ds[i].blockSize.y));
+    }
 
     glViewport(0, 0, w, h);
 
@@ -359,11 +334,14 @@ void reshape(int w, int h)
 void cleanup()
 {
     freeCudaBuffers();
-
-    if (ds->pbo) {
-        cudaGraphicsUnregisterResource(current->cuda_pbo_resource);
-        glDeleteBuffersARB(1, &current_>pbo);
-        glDeleteTextures(1, &current->tex);
+    int i;
+    for(i=0; i<num_sets; i++)
+    {
+	if (ds[i].pbo) {
+	    cudaGraphicsUnregisterResource(ds[i].cuda_pbo_resource);
+	    glDeleteBuffersARB(1, &(ds[i].pbo));
+	    glDeleteTextures(1, &(ds[i].tex));
+	}
     }
 }
 
@@ -396,16 +374,22 @@ void initPixelBuffer(DataSetPtr ds_pix)
     // create pixel buffer object for display
     glGenBuffersARB(1, &ds_pix->pbo);
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, ds_pix->pbo);
-    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, ds_pix->width*ds_pix->height*sizeof(GLubyte)*4, 0, GL_STREAM_DRAW_ARB);
+    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, 
+		    ds_pix->width*ds_pix->height*sizeof(GLubyte)*4, 0, 
+		    GL_STREAM_DRAW_ARB);
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 
     // register this buffer object with CUDA
-    HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&ds_pix->cuda_pbo_resource, ds_pix->pbo, cudaGraphicsMapFlagsWriteDiscard) );
+    HANDLE_ERROR( cudaGraphicsGLRegisterBuffer(&ds_pix->cuda_pbo_resource, 
+						ds_pix->pbo, 
+						cudaGraphicsMapFlagsWriteDiscard) );
 
     // create texture for display
     glGenTextures(1, &ds_pix->tex);
     glBindTexture(GL_TEXTURE_2D, ds_pix->tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ds_pix->width, ds_pix->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ds_pix->width, 
+					     ds_pix->height, 0, 
+					     GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -454,36 +438,72 @@ int main(int argc, char** argv)
     // This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
     initGL( &argc, argv );
 
-    DataSetPtr ds = (DataSetPtr)malloc(sizeof(DataSet));
-
-//========= Initialize dataset structure values =========================
-    ds->volumeName = "Bucky.raw";
-    ds->filePath   = "./data/Bucky.raw";
-    ds->volumeSize = make_cudaExtent(32, 32, 32)
-    ds->size   = ds->volumeSize.width * ds->volumeSize.height 
-				      * ds->volumeSize.depth 
-				      * sizeof(unsigned char);
-    ds->width  = 512;
-    ds->hieght = 512;
-    ds->blockSize(16, 16);
-    ds->density		= 0.05f;
-    ds->brightness      = 1.0f;
-    ds->transferOffset  = 0.0f;
-    ds->transferScale   = 1.0f;
-    ds->linearFiltering = true;
-    ds->viewTranslation = make_float3(0.0, 0.0, -4.0f);
+//========= Initialize dataset structure values ===============================
+    ds[0].volumeFilename = "Bucky.raw";
+    ds[0].filePath   = "./data/Bucky.raw";
+    ds[0].volumeSize = make_cudaExtent(32, 32, 32);
+    ds[0].size = ds[0].volumeSize.width * ds[0].volumeSize.height * ds[0].volumeSize.depth * sizeof(unsigned char);
+    ds[0].width  = 512;
+    ds[0].height = 512;
+    ds[0].blockSize	  = dim3(16, 16);
+    ds[0].density	  = 0.05f;
+    ds[0].brightness      = 1.0f;
+    ds[0].transferOffset  = 0.0f;
+    ds[0].transferScale   = 1.0f;
+    ds[0].linearFiltering = true;
+    ds[0].viewTranslation = make_float3(0.0, 0.0, -4.0f);
 //========= End initializing dataset structure values =========================
 
-    current = ds;
+//========= Initialize dataset structure values ===============================
+    ds[1].volumeFilename = "Bucky.raw";
+    ds[1].filePath   = "./data/Bucky.raw";
+    ds[1].volumeSize = make_cudaExtent(32, 32, 32);
+    ds[1].size   = ds[1].volumeSize.width * ds[1].volumeSize.height 
+				      * ds[1].volumeSize.depth 
+				      * sizeof(unsigned char);
+    ds[1].width  = 512;
+    ds[1].height = 512;
+    ds[1].blockSize	  = dim3(16, 16);
+    ds[1].density	  = 0.05f;
+    ds[1].brightness      = 1.0f;
+    ds[1].transferOffset  = 0.0f;
+    ds[1].transferScale   = 1.0f;
+    ds[1].linearFiltering = true;
+    ds[1].viewTranslation = make_float3(0.0, 0.0, -4.0f);
+//========= End initializing dataset structure values =========================
+
+//========= Initialize dataset structure values ===============================
+    ds[2].volumeFilename = "Bucky.raw";
+    ds[2].filePath   = "./data/Bucky.raw";
+    ds[2].volumeSize = make_cudaExtent(32, 32, 32);
+    ds[2].size   = ds[2].volumeSize.width * ds[2].volumeSize.height 
+				      * ds[2].volumeSize.depth 
+				      * sizeof(unsigned char);
+    ds[2].width  = 512;
+    ds[2].height = 512;
+    ds[2].blockSize	   = dim3(16, 16);
+    ds[2].density	   = 0.05f;
+    ds[2].brightness      = 1.0f;
+    ds[2].transferOffset  = 0.0f;
+    ds[2].transferScale   = 1.0f;
+    ds[2].linearFiltering = true;
+    ds[2].viewTranslation = make_float3(0.0, 0.0, -4.0f);
+//========= End initializing dataset structure values =========================
+
+    current = &(ds[1]);
 
     // load volume data
-    ds->h_volume = loadRawFile(ds->path, ds->size);
-    initCuda(ds->h_volume, ds->volumeSize);
-    free(ds->h_volume);
-    initPixelBuffer(ds);
-
+    int index;
+    for(index=0; index<num_sets; index++)
+    {
+	ds[index].h_volume = loadRawFile(ds[index].filePath, ds[index].size);
+	initCuda(ds[index].h_volume, ds[index].volumeSize);
+	free(ds[index].h_volume);
+	initPixelBuffer(&ds[index]);
+    }
     // calculate new grid size
-    ds->gridSize = dim3(iDivUp(ds->width, ds->blockSize.x), iDivUp(ds->height, ds->blockSize.y));
+    current->gridSize = dim3(iDivUp(current->width, current->blockSize.x), 
+			     iDivUp(current->height, current->blockSize.y));
 
     // This is the normal rendering path for VolumeRender
     glutDisplayFunc(display);
